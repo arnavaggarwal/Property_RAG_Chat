@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import qdrant_client
 import streamlit as st
-from dotenv import load_dotenv
+import toml
 from langchain.chains import ConversationalRetrievalChain
 from langchain.chains.query_constructor.schema import (
     AttributeInfo,
@@ -15,7 +15,28 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client.http import models as rest
 from utils.rate_limit import TokenBucket  # Added rate limiting helper
 
-load_dotenv()
+from pathlib import Path
+
+# ─── CONFIG LOADING ──────────────────────────────────────────────────────────────
+config_path = Path(__file__).parent.parent / "config.toml"
+if config_path.exists():
+    config = toml.load(config_path)
+    azure_cfg  = config.get("azure_openai", {})
+    qdrant_cfg = config.get("qdrant", {})
+else:
+    azure_cfg  = st.secrets.get("azure_openai", {})
+    qdrant_cfg = st.secrets.get("qdrant", {})
+
+# Azure OpenAI settings
+AZURE_OPENAI_API_KEY             = azure_cfg.get("api_key", "")
+AZURE_OPENAI_ENDPOINT            = azure_cfg.get("endpoint", "")
+AZURE_OPENAI_CHAT_DEPLOYMENT_NAME      = azure_cfg.get("chat_deployment_name", "gpt-4.1")
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = azure_cfg.get("embedding_deployment_name", "text-embedding-ada-002")
+
+# Qdrant settings
+QDRANT_HOST = qdrant_cfg.get("host", "localhost")
+QDRANT_PORT = int(qdrant_cfg.get("port", 6333))
+COLLECTION_NAME = "real_estate_properties"
 
 # --------------- USER EDITABLE VARIABLES ---------------
 csv_file_path = "enhanced_property_data_with_rich_descriptions.csv"
@@ -145,9 +166,20 @@ document_content_description = "A textual description of a real estate property,
 
 # ------------------------------------------------------
 
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
-COLLECTION_NAME = "real_estate_properties"
+# QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+# QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+# ─── STREAMLIT SECRETS ─────────────────────────────────────────────────────────
+# azure_cfg   = st.secrets["azure_openai"]
+# QDRANT_CFG  = st.secrets.get("qdrant", {})
+
+# AZURE_OPENAI_API_KEY            = azure_cfg["api_key"]
+# AZURE_OPENAI_ENDPOINT           = azure_cfg["endpoint"]
+# AZURE_OPENAI_CHAT_DEPLOYMENT    = azure_cfg["chat_deployment_name"]
+# AZURE_OPENAI_EMBEDDING_DEPLOY   = azure_cfg["embedding_deployment_name"]
+
+# QDRANT_HOST = QDRANT_CFG.get("host", "localhost")
+# QDRANT_PORT = int(QDRANT_CFG.get("port", 6333))
+# COLLECTION_NAME = "real_estate_properties"
 
 # Rate limiter setup: 30 requests per 30 minutes per session
 bucket = TokenBucket(capacity=10, refill_interval_minutes=30)
@@ -235,43 +267,48 @@ st.markdown(f"**Requests Remaining:** {bucket.remaining()}/{bucket.capacity}   \
 st.title("🏡 AI Real Estate Agent")
 
 # Sidebar credentials
-with st.sidebar:
-    st.header("Azure OpenAI Credentials")
-    st.session_state.AZURE_OPENAI_API_KEY = st.text_input(
-        "Azure OpenAI API Key",
-        type="password",
-        # value=st.session_state.get("AZURE_OPENAI_API_KEY", ""),
-        placeholder="ex. da6ba393hf6e4f76b65837c3fafd2847",
-        value="fa2ba34494de4f76b65514c3da3d3077",    # Placeholder for the API key
-    )
-    st.session_state.AZURE_OPENAI_ENDPOINT = st.text_input(
-        "Azure OpenAI Endpoint",
-        # value=st.session_state.get("AZURE_OPENAI_ENDPOINT", ""),
-        placeholder="ex. https://<org-name>.openai.azure.com",
-        value="https://medlr-llm-0.openai.azure.com/",  # Placeholder for the endpoint
-    )
-    st.session_state.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME = st.text_input(
-        "Chat Deployment Name",
-        # value=st.session_state.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", ""),
-        help="ex. gpt-4.1 or better",
-        value="gpt-4.1",
-    )
-    st.session_state.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = st.text_input(
-        "Embedding Deployment Name",
-        # value=st.session_state.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", ""),
-        help="ex. text-embedding-ada-002 or better",
-        value="text-embedding-ada-002",
-    )
-    connect_button = st.button("Connect")
+# with st.sidebar:
+#     st.header("Azure OpenAI Credentials")
+#     st.session_state.AZURE_OPENAI_API_KEY = st.text_input(
+#         "Azure OpenAI API Key",
+#         type="password",
+#         # value=st.session_state.get("AZURE_OPENAI_API_KEY", ""),
+#         value=AZURE_OPENAI_API_KEY,
+#         placeholder="ex. da6ba393hf6e4f76b65837c3fafd2847",
+#         # value="fa2ba34494de4f76b65514c3da3d3077",    # Placeholder for the API key
+#     )
+#     st.session_state.AZURE_OPENAI_ENDPOINT = st.text_input(
+#         "Azure OpenAI Endpoint",
+#         # value=st.session_state.get("AZURE_OPENAI_ENDPOINT", ""),
+#         value=AZURE_OPENAI_ENDPOINT,
+#         placeholder="ex. https://<org-name>.openai.azure.com",
+#         # value="https://medlr-llm-0.openai.azure.com/",  # Placeholder for the endpoint
+#     )
+#     st.session_state.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME = st.text_input(
+#         "Chat Deployment Name",
+#         # value=st.session_state.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", ""),
+#         value=AZURE_OPENAI_CHAT_DEPLOYMENT_NAME,
+#         help="ex. gpt-4.1 or better",
+#         # value="gpt-4.1",
+#     )
+#     st.session_state.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = st.text_input(
+#         "Embedding Deployment Name",
+#         # value=st.session_state.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", ""),
+#         value=AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
+#         help="ex. text-embedding-ada-002 or better",
+#         # value="text-embedding-ada-002",
+#     )
+#     connect_button = st.button("Connect")
+connect_button = True
 
 # Connect to Azure and initialize models
 if connect_button:
     llm_model, embeddings = get_llm_and_embeddings(
-        st.session_state.AZURE_OPENAI_API_KEY,
-        st.session_state.AZURE_OPENAI_ENDPOINT,
-        st.session_state.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME,
-        st.session_state.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
-    )
+    config["azure_openai"]["api_key"],
+    config["azure_openai"]["endpoint"],
+    config["azure_openai"]["chat_deployment_name"],
+    config["azure_openai"]["embedding_deployment_name"],
+)
     st.session_state.llm_model = llm_model
     st.session_state.embeddings = embeddings
     st.sidebar.success("Connected to Azure OpenAI!")
