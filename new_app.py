@@ -193,15 +193,15 @@ def get_qdrant_client():
 
 @st.cache_resource
 def get_llm_and_embeddings(
-    azure_api_key, azure_endpoint, azure_chat_deployment, azure_embedding_deployment
+    AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_CHAT_DEPLOYMENT_NAME, AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
 ):
     """Caches the LLM and embeddings models."""
     if not all(
         [
-            azure_api_key,
-            azure_endpoint,
-            azure_chat_deployment,
-            azure_embedding_deployment,
+            AZURE_OPENAI_API_KEY,
+            AZURE_OPENAI_ENDPOINT,
+            AZURE_OPENAI_CHAT_DEPLOYMENT_NAME,
+            AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
         ]
     ):
         st.error(
@@ -210,16 +210,16 @@ def get_llm_and_embeddings(
         st.stop()
 
     embeddings = AzureOpenAIEmbeddings(
-        azure_deployment=azure_embedding_deployment.strip(),
+        azure_deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME.strip(),
         api_version="2023-05-15",
-        api_key=azure_api_key.strip(),
-        azure_endpoint=azure_endpoint.strip(),
+        api_key=AZURE_OPENAI_API_KEY.strip(),
+        azure_endpoint=AZURE_OPENAI_ENDPOINT.strip(),
     )
     llm = AzureChatOpenAI(
         api_version="2025-01-01-preview",
-        azure_deployment=azure_chat_deployment.strip(),
-        api_key=azure_api_key.strip(),
-        azure_endpoint=azure_endpoint.strip(),
+        azure_deployment=AZURE_OPENAI_CHAT_DEPLOYMENT_NAME.strip(),
+        api_key=AZURE_OPENAI_API_KEY.strip(),
+        azure_endpoint=AZURE_OPENAI_ENDPOINT.strip(),
         temperature=0.1,
     )
     return llm, embeddings
@@ -304,10 +304,10 @@ connect_button = True
 # Connect to Azure and initialize models
 if connect_button:
     llm_model, embeddings = get_llm_and_embeddings(
-    config["azure_openai"]["api_key"],
-    config["azure_openai"]["endpoint"],
-    config["azure_openai"]["chat_deployment_name"],
-    config["azure_openai"]["embedding_deployment_name"],
+    AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_ENDPOINT,
+    AZURE_OPENAI_CHAT_DEPLOYMENT_NAME,
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
 )
     st.session_state.llm_model = llm_model
     st.session_state.embeddings = embeddings
