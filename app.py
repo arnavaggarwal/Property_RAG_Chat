@@ -1,20 +1,19 @@
-import streamlit as st
-import pandas as pd
-import qdrant_client
-from dotenv import load_dotenv
 import os
 
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain_qdrant import QdrantVectorStore
+import pandas as pd
+import qdrant_client
+import streamlit as st
+from dotenv import load_dotenv
 from langchain.chains import ConversationalRetrievalChain
-from langchain_core.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
-from qdrant_client.http import models as rest
-
-from langchain.retrievers.self_query.base import SelfQueryRetriever
 from langchain.chains.query_constructor.schema import (
     AttributeInfo,
 )
+from langchain.memory import ConversationBufferMemory
+from langchain.retrievers.self_query.base import SelfQueryRetriever
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client.http import models as rest
 
 load_dotenv()
 
@@ -45,7 +44,7 @@ Description: {page_content}
 QA_PROMPT_TEMPLATE = """You are a world-class AI real estate agent: charismatic, empathetic, and incredibly knowledgeable. Your primary goal is to build rapport with the client and guide them to their perfect home from the available listings.
 
 **Your Core Task:**
-Use the **Available Property Listings** provided in the context to answer the client's questions. These listings are your ONLY source of truth. Do not make up properties or features that are not explicitly listed in the context.
+Use the **Available Property Listings** provided in the context to answer the client's questions. These listings are your ONLY source of truth. Do not make up properties or features that are not explicitly listed in the context.  Always start by asking the user clarifying questions about city and location if not mentioned in their query.
 
 **Personality and Selling Style:**
 - **Opener:** Start with a warm, friendly greeting. Ask open-ended questions like "What's bringing you to the market today?" or "Tell me a bit about the dream home you're imagining."
@@ -160,13 +159,16 @@ def get_qdrant_client():
 
 
 @st.cache_resource
-def get_llm_and_embeddings():
+def get_llm_and_embeddings(
+    azure_api_key, azure_endpoint, azure_chat_deployment, azure_embedding_deployment
+):
+    """Caches the LLM and embeddings models."""
     if not all(
         [
-            os.getenv("AZURE_OPENAI_API_KEY"),
-            os.getenv("AZURE_OPENAI_ENDPOINT"),
-            os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"),
-            os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
+            azure_api_key,
+            azure_endpoint,
+            azure_chat_deployment,
+            azure_embedding_deployment,
         ]
     ):
         st.error(
@@ -175,14 +177,17 @@ def get_llm_and_embeddings():
         st.stop()
 
     embeddings = AzureOpenAIEmbeddings(
-        azure_deployment=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME"),
+        azure_deployment=azure_embedding_deployment.strip(),
         api_version="2023-05-15",
+        api_key=azure_api_key.strip(),
+        azure_endpoint=azure_endpoint.strip(),
     )
     llm = AzureChatOpenAI(
         api_version="2025-01-01-preview",
-        azure_deployment=os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"),
+        azure_deployment=azure_chat_deployment.strip(),
+        api_key=azure_api_key.strip(),
+        azure_endpoint=azure_endpoint.strip(),
         temperature=0.1,
-        max_tokens=None,
     )
     return llm, embeddings
 
@@ -227,80 +232,129 @@ QA_PROMPT = PromptTemplate.from_template(QA_PROMPT_TEMPLATE)
 st.set_page_config(page_title="AI Real Estate Agent", layout="wide")
 st.title("🏡 AI Real Estate Agent")
 
-qdrant_cli = get_qdrant_client()
-llm_model, embeddings = get_llm_and_embeddings()
-
 with st.sidebar:
-    st.header("Database Status")
-    initialize_database(qdrant_cli, embeddings)
+    st.header("Azure OpenAI Credentials")
+    st.session_state.AZURE_OPENAI_API_KEY = st.text_input(
+        "Azure OpenAI API Key",
+        type="password",
+        value=st.session_state.get("AZURE_OPENAI_API_KEY", ""),
+        placeholder="ex. da6ba393hf6e4f76b65837c3fafd2847",
+        # value="John Doe",    # Placeholder for the API key
+    )
+    st.session_state.AZURE_OPENAI_ENDPOINT = st.text_input(
+        "Azure OpenAI Endpoint",
+        value=st.session_state.get("AZURE_OPENAI_ENDPOINT", ""),
+        placeholder="ex. https://<org-name>.openai.azure.com",
+        # value="John Doe",  # Placeholder for the endpoint
+    )
+    st.session_state.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME = st.text_input(
+        "Chat Deployment Name",
+        # value=st.session_state.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", ""),
+        help="ex. gpt-4.1 or better",
+        value="gpt-4.1",
+    )
+    st.session_state.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = st.text_input(
+        "Embedding Deployment Name",
+        # value=st.session_state.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", ""),
+        help="ex. text-embedding-ada-002 or better",
+        value="text-embedding-ada-002",
+    )
+    connect_button = st.button("Connect")
 
-if "memory" not in st.session_state:
-    st.session_state.memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True,
-        output_key="answer",
-        input_key="question",
+if connect_button:
+    llm_model, embeddings = get_llm_and_embeddings(
+        st.session_state.AZURE_OPENAI_API_KEY,
+        st.session_state.AZURE_OPENAI_ENDPOINT,
+        st.session_state.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME,
+        st.session_state.AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME,
+    )
+    st.session_state.llm_model = llm_model
+    st.session_state.embeddings = embeddings
+    st.sidebar.success("Connected to Azure OpenAI!")
+
+
+if "llm_model" in st.session_state and "embeddings" in st.session_state:
+    qdrant_cli = get_qdrant_client()
+    llm_model = st.session_state.llm_model
+    embeddings = st.session_state.embeddings
+
+    with st.sidebar:
+        st.header("Database Status")
+        initialize_database(qdrant_cli, embeddings)
+
+    if "memory" not in st.session_state:
+        st.session_state.memory = ConversationBufferMemory(
+            memory_key="chat_history",
+            return_messages=True,
+            output_key="answer",
+            input_key="question",
+        )
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            if (
+                message["role"] == "assistant"
+                and "sources" in message
+                and message["sources"]
+            ):
+                with st.expander(
+                    f"See the {len(message['sources'])} properties I considered"
+                ):
+                    for doc in message["sources"]:
+                        st.markdown(
+                            f"**Address:** {doc.metadata.get('address', 'N/A')}, {doc.metadata.get('city', 'N/A')}"
+                        )
+                        st.markdown(f"**Price:** ${doc.metadata.get('price', 0):,}")
+                        st.markdown(
+                            f"**Details:** {doc.metadata.get('bedrooms', 'N/A')} bed, {doc.metadata.get('bathrooms', 'N/A')} bath, {doc.metadata.get('size_sqft', 'N/A')} sqft"
+                        )
+                        st.markdown(f"**Description:** *{doc.page_content}*")
+                        st.markdown("---")
+
+    vector_store = QdrantVectorStore(
+        client=qdrant_cli,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings,
     )
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    retriever = SelfQueryRetriever.from_llm(
+        llm=llm_model,
+        vectorstore=vector_store,
+        document_contents=document_content_description,
+        metadata_field_info=metadata_field_info,
+        verbose=True,
+    )
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if (
-            message["role"] == "assistant"
-            and "sources" in message
-            and message["sources"]
-        ):
-            with st.expander(
-                f"See the {len(message['sources'])} properties I considered"
-            ):
-                for doc in message["sources"]:
-                    st.markdown(
-                        f"**Address:** {doc.metadata.get('address', 'N/A')}, {doc.metadata.get('city', 'N/A')}"
-                    )
-                    st.markdown(f"**Price:** ${doc.metadata.get('price', 0):,}")
-                    st.markdown(
-                        f"**Details:** {doc.metadata.get('bedrooms', 'N/A')} bed, {doc.metadata.get('bathrooms', 'N/A')} bath, {doc.metadata.get('size_sqft', 'N/A')} sqft"
-                    )
-                    st.markdown(f"**Description:** *{doc.page_content}*")
-                    st.markdown("---")
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm_model,
+        retriever=retriever,
+        memory=st.session_state.memory,
+        combine_docs_chain_kwargs={
+            "prompt": QA_PROMPT,
+            "document_prompt": DOCUMENT_PROMPT,
+        },
+        return_source_documents=True,
+    )
 
-vector_store = QdrantVectorStore(
-    client=qdrant_cli,
-    collection_name=COLLECTION_NAME,
-    embedding=embeddings,
-)
+    if prompt := st.chat_input(placeholder_chat):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-retriever = SelfQueryRetriever.from_llm(
-    llm=llm_model,
-    vectorstore=vector_store,
-    document_contents=document_content_description,
-    metadata_field_info=metadata_field_info,
-    verbose=True,
-)
+        with st.spinner("Analyzing your request and filtering properties..."):
+            response = qa_chain.invoke({"question": prompt})
 
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm_model,
-    retriever=retriever,
-    memory=st.session_state.memory,
-    combine_docs_chain_kwargs={"prompt": QA_PROMPT, "document_prompt": DOCUMENT_PROMPT},
-    return_source_documents=True,
-)
+        assistant_message = {
+            "role": "assistant",
+            "content": response["answer"],
+            "sources": response["source_documents"],
+        }
+        st.session_state.messages.append(assistant_message)
+        st.rerun()
 
-if prompt := st.chat_input(placeholder_chat):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.spinner("Analyzing your request and filtering properties..."):
-        response = qa_chain.invoke({"question": prompt})
-
-    assistant_message = {
-        "role": "assistant",
-        "content": response["answer"],
-        "sources": response["source_documents"],
-    }
-    st.session_state.messages.append(assistant_message)
-    st.rerun()
+else:
+    st.info("Please enter your Azure credentials and click 'Connect' to begin.")
